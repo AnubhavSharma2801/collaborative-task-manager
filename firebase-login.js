@@ -1,16 +1,16 @@
 'use strict';
 
 //import firebase
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
-import {getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js"
+import { initializeApp } from "https://www.gstatic.com/firebasejs/****firebase-app.js";
+import {getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/***/firebase-auth.js"
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBRK9ukDcpFFFzm0OMp0u46-jiL4yb1rcU",
-  authDomain: "assignment2-455318.firebaseapp.com",
-  projectId: "assignment2-455318",
-  storageBucket: "assignment2-455318.firebasestorage.app",
-  messagingSenderId: "197763944944",
-  appId: "1:197763944944:web:17cb2b2300576d28618d35"
+  apiKey: "ARTgaSy********",
+  authDomain: "*****.firebaseapp.com",
+  projectId: "*****",
+  storageBucket: "*******.firebasestorage.app",
+  messagingSenderId: "127____",
+  appId: "2:_____**"
 };
   
 const app = initializeApp(firebaseConfig);
