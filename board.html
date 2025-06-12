@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Board</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script type="module" src="/static/firebase-login.js"></script>
+    <style>
+        .task-item {
+            border: 1px solid #ccc;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+
+        .task-item.completed {
+            background-color: #e8f5e9;  /* Light green background */
+            border-color: #4caf50;  /* Green border */
+        }
+
+        .task-item.unassigned-highlight {
+            background-color: #ffebee;  /* Light red background */
+            border-color: #f44336;  /* Red border */
+        }
+
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .task-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .task-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+
+        .task-status.completed {
+            background-color: #4caf50;
+            color: white;
+        }
+
+        .task-status.active {
+            background-color: #2196f3;
+            color: white;
+        }
+
+        .completion-info {
+            font-style: italic;
+            color: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="board-header">
+            <a href="/" class="back-button">← Back to Boards</a>
+            <div class="board-title-container">
+                <h1 id="boardTitle">{{ board_title }}</h1>
+                {% if is_creator %}
+                <button id="editTitleBtn" class="edit-title-btn">✎</button>
+                {% endif %}
+            </div>
+            <div id="boardStats" class="board-stats">
+                <span>Total Tasks: <span id="totalTasks">0</span></span>
+                <span>Active Tasks: <span id="activeTasks">0</span></span>
+                <span>Completed Tasks: <span id="completedTasks">0</span></span>
+            </div>
+        </div>
+
+        <div id="error-message" style="display: none;" class="error-message"></div>
+
+        <div id="board-container" data-is-creator="{{ is_creator }}">
+            <div class="board-content">
+                <div class="members-section">
+                    <h2>Board Members</h2>
+                    <div id="membersList"></div>
+                    {% if is_creator %}
+                    <form id="addMemberForm" class="add-member-form">
+                        <select id="memberEmail" required>
+                            <option value="">Select a user</option>
+                        </select>
+                        <button type="submit">Add Member</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                <div class="tasks-section">
+                    <h2>Tasks</h2>
+                    <form id="createTaskForm" class="create-task-form">
+                        <input type="text" id="taskTitle" placeholder="Task title" required>
+                        <textarea id="taskDescription" placeholder="Task description" required></textarea>
+                        <input type="datetime-local" id="taskDueDate" required>
+                        <select id="taskAssignee">
+                            <option value="">Unassigned</option>
+                        </select>
+                        <button type="submit">Create Task</button>
+                    </form>
+                    <div id="tasksList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="editTaskModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Edit Task</h2>
+            <form id="editTaskForm">
+                <input type="text" id="editTaskTitle" placeholder="Task title" required>
+                <textarea id="editTaskDescription" placeholder="Task description" required></textarea>
+                <input type="datetime-local" id="editTaskDueDate" required>
+                <select id="editTaskAssignee">
+                    <option value="">Unassigned</option>
+                </select>
+                <button type="submit">Save Changes</button>
+                <button type="button" class="cancel-btn" onclick="closeEditModal()">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const boardId = '{{ board_id }}';
+        const isCreator = JSON.parse('{{ is_creator|tojson }}');
+        let currentEditingTaskId = null;
+        let allUsers = [];
+
+        // Load board data when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAllUsers();
+            loadMembers();
+            loadTasks();
+            loadBoardStats();
+            setupBoardTitle();
+            
+            // Close modal if clicked outside
+            document.getElementById('editTaskModal').addEventListener('click', (e) => {
+                if (e.target === document.getElementById('editTaskModal')) {
+                    closeEditModal();
+                }
+            });
+        });
+
+        function setupBoardTitle() {
+            const editTitleBtn = document.getElementById('editTitleBtn');
+            if (editTitleBtn) {
+                editTitleBtn.addEventListener('click', () => {
+                    const titleElement = document.getElementById('boardTitle');
+                    const currentTitle = titleElement.textContent;
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.value = currentTitle;
+                    input.className = 'board-title-input';
+                    
+                    input.addEventListener('blur', async () => {
+                        const newTitle = input.value.trim();
+                        if (newTitle && newTitle !== currentTitle) {
+                            try {
+                                const response = await fetch(`/boards/${boardId}/rename`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ title: newTitle })
+                                });
+                                
+                                if (response.ok) {
+                                    titleElement.textContent = newTitle;
+                                } else {
+                                    throw new Error('Failed to rename board');
+                                }
+                            } catch (error) {
+                                alert('Failed to rename board: ' + error.message);
+                                titleElement.textContent = currentTitle;
+                            }
+                        } else {
+                            titleElement.textContent = currentTitle;
+                        }
+                    });
+
+                    titleElement.textContent = '';
+                    titleElement.appendChild(input);
+                    input.focus();
+                });
+            }
+        }
+
+        async function loadAllUsers() {
+            try {
+                const response = await fetch('/users');
+                if (response.ok) {
+                    allUsers = await response.json();
+                    updateUserDropdowns();
+                }
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+
+        function updateUserDropdowns() {
+            // Update member dropdown
+            const memberSelect = document.getElementById('memberEmail');
+            if (memberSelect) {
+                memberSelect.innerHTML = '<option value="">Select a user</option>';
+                allUsers.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.email;
+                    option.textContent = user.email;
+                    memberSelect.appendChild(option);
+                });
+            }
+
+            // Update task assignee dropdowns
+            const assigneeSelect = document.getElementById('taskAssignee');
+            const editAssigneeSelect = document.getElementById('editTaskAssignee');
+            
+            [assigneeSelect, editAssigneeSelect].forEach(select => {
+                if (select) {
+                    select.innerHTML = '<option value="">Unassigned</option>';
+                    allUsers.forEach(user => {
+                        const option = document.createElement('option');
+                        option.value = user.id;
+                        option.textContent = user.email;
+                        select.appendChild(option);
+                    });
+                }
+            });
+        }
+
+        async function loadMembers() {
+            try {
+                const response = await fetch(`/boards/${boardId}/members`);
+                const members = await response.json();
+                
+                const membersList = document.getElementById('membersList');
+                const assigneeSelect = document.getElementById('taskAssignee');
+                const editAssigneeSelect = document.getElementById('editTaskAssignee');
+                
+                // Clear existing options except "Unassigned"
+                assigneeSelect.innerHTML = '<option value="">Unassigned</option>';
+                editAssigneeSelect.innerHTML = '<option value="">Unassigned</option>';
+                
+                membersList.innerHTML = '';
+                members.forEach(member => {
+                    const memberDiv = document.createElement('div');
+                    memberDiv.className = 'member-item';
+                    memberDiv.innerHTML = `
+                        <span>${member.email} ${member.is_creator ? '(Creator)' : ''}</span>
+                        ${isCreator && !member.is_creator ? 
+                            `<button onclick="removeMember('${member.id}')" class="remove-member-btn">Remove</button>` : 
+                            ''}
+                    `;
+                    membersList.appendChild(memberDiv);
+
+                    // Add member to assignee dropdowns
+                    const option = document.createElement('option');
+                    option.value = member.id;
+                    option.textContent = member.email;
+                    assigneeSelect.appendChild(option.cloneNode(true));
+                    editAssigneeSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading members:', error);
+            }
+        }
+
+        async function removeMember(memberId) {
+            if (!confirm('Are you sure you want to remove this member? Their tasks will be marked as unassigned.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/boards/${boardId}/members/${memberId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadMembers();
+                    loadTasks();
+                    loadBoardStats();
+                } else {
+                    throw new Error('Failed to remove member');
+                }
+            } catch (error) {
+                alert('Failed to remove member: ' + error.message);
+            }
+        }
+
+        async function loadTasks() {
+            try {
+                const response = await fetch(`/boards/${boardId}/tasks`);
+                const tasks = await response.json();
+                
+                const tasksList = document.getElementById('tasksList');
+                tasksList.innerHTML = '';
+                
+                tasks.forEach(task => {
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = `task-item ${task.completed ? 'completed' : ''} ${!task.assigned_to && task.previously_assigned ? 'unassigned-highlight' : ''}`;
+                    
+                    const completionInfo = task.completed && task.completed_at 
+                        ? `<div class="completion-info">Completed on ${new Date(task.completed_at).toLocaleString()}</div>`
+                        : '';
+                    
+                    taskDiv.innerHTML = `
+                        <div class="task-header">
+                            <div>
+                                <h3>${escapeHtml(task.title)}</h3>
+                                <div class="task-status ${task.completed ? 'completed' : 'active'}">
+                                    ${task.completed ? '✓ Completed' : '⚪ Active'}
+                                </div>
+                                ${completionInfo}
+                            </div>
+                            <div class="task-actions">
+                                <button onclick="editTask('${task.id}')" class="edit-btn">Edit</button>
+                                <button onclick="deleteTask('${task.id}')" class="delete-btn">Delete</button>
+                                <button onclick="toggleTaskStatus('${task.id}', ${!task.completed})" class="toggle-btn">
+                                    ${task.completed ? 'Mark Incomplete' : 'Mark Complete'}
+                                </button>
+                            </div>
+                        </div>
+                        <p>${escapeHtml(task.description)}</p>
+                        <div class="task-meta">
+                            <span>Due: ${new Date(task.due_date).toLocaleString()}</span>
+                            <span>Assigned to: ${task.assigned_to ? getMemberEmail(task.assigned_to) : 'Unassigned'}</span>
+                            <span>Created by: ${getMemberEmail(task.created_by)}</span>
+                        </div>
+                    `;
+                    tasksList.appendChild(taskDiv);
+                });
+            } catch (error) {
+                console.error('Error loading tasks:', error);
+            }
+        }
+
+        function getMemberEmail(userId) {
+            const assigneeSelect = document.getElementById('taskAssignee');
+            const option = Array.from(assigneeSelect.options).find(opt => opt.value === userId);
+            return option ? option.textContent : 'Unknown';
+        }
+
+        async function editTask(taskId) {
+            try {
+                const response = await fetch(`/boards/${boardId}/tasks`);
+                const tasks = await response.json();
+                const task = tasks.find(t => t.id === taskId);
+                
+                if (task) {
+                    currentEditingTaskId = taskId;
+                    document.getElementById('editTaskTitle').value = task.title;
+                    document.getElementById('editTaskDescription').value = task.description;
+                    document.getElementById('editTaskDueDate').value = task.due_date.slice(0, 16);
+                    document.getElementById('editTaskAssignee').value = task.assigned_to || '';
+                    
+                    document.getElementById('editTaskModal').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading task for edit:', error);
+            }
+        }
+
+        function closeEditModal() {
+            const modal = document.getElementById('editTaskModal');
+            modal.style.display = 'none';
+            currentEditingTaskId = null;
+            // Reset form
+            document.getElementById('editTaskForm').reset();
+        }
+
+        document.getElementById('editTaskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentEditingTaskId) return;
+
+            try {
+                const response = await fetch(`/tasks/${currentEditingTaskId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        board_id: boardId,
+                        title: document.getElementById('editTaskTitle').value,
+                        description: document.getElementById('editTaskDescription').value,
+                        due_date: document.getElementById('editTaskDueDate').value,
+                        assigned_to: document.getElementById('editTaskAssignee').value || null
+                    })
+                });
+
+                if (response.ok) {
+                    closeEditModal();
+                    loadTasks();
+                    loadBoardStats();
+                } else {
+                    throw new Error('Failed to update task');
+                }
+            } catch (error) {
+                alert('Failed to update task: ' + error.message);
+            }
+        });
+
+        async function deleteTask(taskId) {
+            if (!confirm('Are you sure you want to delete this task?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/tasks/${taskId}?board_id=${boardId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadTasks();
+                    loadBoardStats();
+                } else {
+                    throw new Error('Failed to delete task');
+                }
+            } catch (error) {
+                alert('Failed to delete task: ' + error.message);
+            }
+        }
+
+        async function toggleTaskStatus(taskId, completed) {
+            try {
+                const response = await fetch(`/tasks/${taskId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        board_id: boardId,
+                        completed: completed
+                    })
+                });
+
+                if (response.ok) {
+                    loadTasks();
+                    loadBoardStats();
+                } else {
+                    throw new Error('Failed to update task status');
+                }
+            } catch (error) {
+                alert('Failed to update task status: ' + error.message);
+            }
+        }
+
+        async function loadBoardStats() {
+            try {
+                const response = await fetch(`/boards/${boardId}/stats`);
+                const stats = await response.json();
+                
+                document.getElementById('totalTasks').textContent = stats.total_tasks;
+                document.getElementById('activeTasks').textContent = stats.active_tasks;
+                document.getElementById('completedTasks').textContent = stats.completed_tasks;
+            } catch (error) {
+                console.error('Error loading board stats:', error);
+            }
+        }
+
+        document.getElementById('createTaskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const response = await fetch(`/boards/${boardId}/tasks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: document.getElementById('taskTitle').value,
+                        description: document.getElementById('taskDescription').value,
+                        due_date: document.getElementById('taskDueDate').value,
+                        assigned_to: document.getElementById('taskAssignee').value || null
+                    })
+                });
+
+                if (response.ok) {
+                    e.target.reset();
+                    loadTasks();
+                    loadBoardStats();
+                } else {
+                    throw new Error('Failed to create task');
+                }
+            } catch (error) {
+                alert('Failed to create task: ' + error.message);
+            }
+        });
+
+        document.getElementById('addMemberForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const response = await fetch(`/boards/${boardId}/members`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('memberEmail').value
+                    })
+                });
+
+                if (response.ok) {
+                    e.target.reset();
+                    loadMembers();
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.message);
+                }
+            } catch (error) {
+                alert('Failed to add member: ' + error.message);
+            }
+        });
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html> 

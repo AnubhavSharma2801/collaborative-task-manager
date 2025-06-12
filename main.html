@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Management</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script type="module" src="/static/firebase-login.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Management System</h1>
+        <div id="auth-container">
+            <div id="login-box">
+                <input type="email" id="email" placeholder="Email" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button id="login">Login</button>
+                <button id="sign-up">Sign Up</button>
+            </div>
+            <button id="sign-out" hidden="true">Sign out</button>
+        </div>
+
+        {% if user_token %}
+        <p>User email: {{ user_token.email }}</p>
+        {% endif %}
+        
+        <div id="error-message" style="display: none;" class="error-message"></div>
+
+        <div id="task-board-container" style="display:none;">
+            <h2>Task Boards</h2>
+            <div id="create-board-container">
+                <form id="board-form">
+                    <input type="text" id="board-title" placeholder="Board Title" required>
+                    <button type="submit">Create Board</button>
+                </form>
+            </div>
+            <div id="boards-list"></div>
+        </div>
+    </div>
+
+    <script>
+        // Show/hide task board container based on authentication
+        function updateTaskBoardVisibility(cookie) {
+            const token = parseCookieToken(cookie);
+            const taskBoardContainer = document.getElementById('task-board-container');
+            if (token && token.length > 0) {
+                taskBoardContainer.style.display = 'block';
+                loadBoards();
+            } else {
+                taskBoardContainer.style.display = 'none';
+            }
+        }
+
+        // Load and display boards
+        async function loadBoards() {
+            try {
+                const response = await fetch('/boards');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch boards');
+                }
+                const boards = await response.json();
+                displayBoards(boards);
+            } catch (error) {
+                console.error('Error loading boards:', error);
+                showError('Failed to load boards. Please try again later.');
+            }
+        }
+
+        function displayBoards(boards) {
+            const boardsList = document.getElementById('boards-list');
+            boardsList.innerHTML = '';
+            
+            boards.forEach(board => {
+                const boardDiv = document.createElement('div');
+                boardDiv.className = 'board-item';
+                boardDiv.innerHTML = `
+                    <h3>${escapeHtml(board.title)}</h3>
+                    <a href="/board/${board.id}" class="view-board-btn">View Board</a>
+                `;
+                boardsList.appendChild(boardDiv);
+            });
+        }
+
+        // Create new board
+        document.getElementById('board-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const titleInput = document.getElementById('board-title');
+            const boardData = {
+                title: titleInput.value.trim()
+            };
+            
+            try {
+                const response = await fetch('/boards', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(boardData)
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to create board');
+                }
+                
+                titleInput.value = '';
+                loadBoards();
+            } catch (error) {
+                console.error('Error creating board:', error);
+                showError('Failed to create board. Please try again.');
+            }
+        });
+
+        // Utility functions
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Parse cookie token (copied from firebase-login.js for consistency)
+        function parseCookieToken(cookie) {
+            const strings = cookie.split(';');
+            for (let i = 0; i < strings.length; i++) {
+                const temp = strings[i].split('=');
+                if (temp[0].trim() === "token")
+                    return temp[1];
+            }
+            return "";
+        }
+
+        // Initial load
+        window.addEventListener('load', function() {
+            updateTaskBoardVisibility(document.cookie);
+        });
+
+        // Update visibility when authentication changes
+        const originalUpdateUI = window.updateUI;
+        window.updateUI = function(cookie) {
+            originalUpdateUI(cookie);
+            updateTaskBoardVisibility(cookie);
+        };
+    </script>
+</body>
+</html>
